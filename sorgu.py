@@ -5,7 +5,7 @@ from discord.ext import commands
 from discord import app_commands, ButtonStyle, TextStyle
 from discord.ui import Button, View, Modal, TextInput
 from flask import Flask
-import cloudscraper
+import httpx
 import json
 
 # ---------------------------------------------------------
@@ -32,18 +32,7 @@ intents = discord.Intents.default()
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 # ---------------------------------------------------------
-# 3. CLOUDSCRAPER (TÜM İSTEKLER İÇİN ORTAK)
-# ---------------------------------------------------------
-scraper = cloudscraper.create_scraper(
-    browser={
-        'browser': 'chrome',
-        'platform': 'windows',
-        'mobile': False
-    }
-)
-
-# ---------------------------------------------------------
-# 4. VERİ FORMATLAMA
+# 3. VERİ FORMATLAMA
 # ---------------------------------------------------------
 def format_data(obj, indent=0):
     lines = []
@@ -65,7 +54,7 @@ def format_data(obj, indent=0):
     return "\n".join(lines)
 
 # ---------------------------------------------------------
-# 5. MODAL
+# 4. MODAL
 # ---------------------------------------------------------
 class SorguModal(Modal):
     def __init__(self, title_name: str, label_name: str, param_type: str):
@@ -87,61 +76,62 @@ class SorguModal(Modal):
         content = ""
 
         try:
-            # --- Discord ID Sorgu ---
-            if self.param_type == "discord_id":
-                url = f"https://discordlookup.mesavirep.xyz/v1/user/{val}"
-                resp = scraper.get(url, timeout=20)
-                if resp.status_code == 200:
-                    content = format_data(resp.json())
-                else:
-                    content = f"⚠️ API Hatası: {resp.status_code}"
-            
-            # --- IP Sorgu (VPN/Proxy Tespiti) ---
-            elif self.param_type == "ip":
-                url = f"http://ip-api.com/json/{val}?fields=status,message,country,regionName,city,isp,org,as,proxy,hosting,query"
-                resp = scraper.get(url, timeout=20)
-                if resp.status_code == 200:
-                    content = format_data(resp.json())
-                else:
-                    content = f"⚠️ API Hatası: {resp.status_code}"
-
-            # --- E-posta İhlal Sorgusu ---
-            elif self.param_type == "email_breach":
-                url = f"https://api.xposedornot.com/v1/check-email/{val}"
-                resp = scraper.get(url, timeout=20)
-                if resp.status_code == 200:
-                    data = resp.json()
-                    breaches = data.get("breaches", [])
-                    if breaches:
-                        content = f"**{val}** adresi şu ihlallerde bulundu:\n\n" + "\n".join([f"• {b}" for b in breaches])
+            async with httpx.AsyncClient() as client:
+                # --- Discord ID Sorgu ---
+                if self.param_type == "discord_id":
+                    url = f"https://discordlookup.mesavirep.xyz/v1/user/{val}"
+                    resp = await client.get(url, timeout=20)
+                    if resp.status_code == 200:
+                        content = format_data(resp.json())
                     else:
+                        content = f"⚠️ API Hatası: {resp.status_code}"
+                
+                # --- IP Sorgu (VPN/Proxy Tespiti) ---
+                elif self.param_type == "ip":
+                    url = f"http://ip-api.com/json/{val}?fields=status,message,country,regionName,city,isp,org,as,proxy,hosting,query"
+                    resp = await client.get(url, timeout=20)
+                    if resp.status_code == 200:
+                        content = format_data(resp.json())
+                    else:
+                        content = f"⚠️ API Hatası: {resp.status_code}"
+
+                # --- E-posta İhlal Sorgusu ---
+                elif self.param_type == "email_breach":
+                    url = f"https://api.xposedornot.com/v1/check-email/{val}"
+                    resp = await client.get(url, timeout=20)
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        breaches = data.get("breaches", [])
+                        if breaches:
+                            content = f"**{val}** adresi şu ihlallerde bulundu:\n\n" + "\n".join([f"• {b}" for b in breaches])
+                        else:
+                            content = f"✅ **{val}** hiçbir bilinen ihlalde bulunamadı."
+                    elif resp.status_code == 404:
                         content = f"✅ **{val}** hiçbir bilinen ihlalde bulunamadı."
-                elif resp.status_code == 404:
-                    content = f"✅ **{val}** hiçbir bilinen ihlalde bulunamadı."
-                else:
-                    content = f"⚠️ API Hatası: {resp.status_code}"
-
-            # --- Telefon Numarası Sorgusu ---
-            elif self.param_type == "phone":
-                url = f"https://api.apify.com/v2/acts/phoneinfoga~phone-number-osint-scanner/run-sync-get-dataset-items?token=FREE_TOKEN&phone={val}"
-                resp = scraper.get(url, timeout=30)
-                if resp.status_code == 200:
-                    data = resp.json()
-                    if data:
-                        content = format_data(data[0])
                     else:
-                        content = "❌ Sonuç bulunamadı."
-                else:
-                    content = f"⚠️ API Hatası: {resp.status_code}"
+                        content = f"⚠️ API Hatası: {resp.status_code}"
 
-            # --- Kullanıcı Adı Sorgusu ---
-            elif self.param_type == "username":
-                url = f"https://api.osint-web-mcp.com/search?username={val}"
-                resp = scraper.get(url, timeout=20)
-                if resp.status_code == 200:
-                    content = format_data(resp.json())
-                else:
-                    content = f"⚠️ API Hatası: {resp.status_code}"
+                # --- Telefon Numarası Sorgusu ---
+                elif self.param_type == "phone":
+                    url = f"https://api.apify.com/v2/acts/phoneinfoga~phone-number-osint-scanner/run-sync-get-dataset-items?token=FREE_TOKEN&phone={val}"
+                    resp = await client.get(url, timeout=30)
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        if data:
+                            content = format_data(data[0])
+                        else:
+                            content = "❌ Sonuç bulunamadı."
+                    else:
+                        content = f"⚠️ API Hatası: {resp.status_code}"
+
+                # --- Kullanıcı Adı Sorgusu ---
+                elif self.param_type == "username":
+                    url = f"https://api.osint-web-mcp.com/search?username={val}"
+                    resp = await client.get(url, timeout=20)
+                    if resp.status_code == 200:
+                        content = format_data(resp.json())
+                    else:
+                        content = f"⚠️ API Hatası: {resp.status_code}"
 
         except Exception as e:
             content = f"❌ Hata: `{str(e)}`"
@@ -155,7 +145,7 @@ class SorguModal(Modal):
         await interaction.followup.send(embed=embed, ephemeral=True)
 
 # ---------------------------------------------------------
-# 6. BUTONLAR
+# 5. BUTONLAR
 # ---------------------------------------------------------
 class SorguPaneliView(View):
     def __init__(self):
@@ -191,7 +181,7 @@ class SorguPaneliView(View):
         await interaction.response.send_modal(modal)
 
 # ---------------------------------------------------------
-# 7. KOMUTLAR
+# 6. KOMUTLAR
 # ---------------------------------------------------------
 @bot.event
 async def on_ready():
