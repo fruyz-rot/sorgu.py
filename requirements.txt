@@ -3,4 +3,4 @@ Flask
 aiohttp
 requests
 gunicorn
-curl_cffi
+cloudscraper
