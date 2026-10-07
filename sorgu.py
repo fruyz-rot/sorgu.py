@@ -10,7 +10,7 @@ from curl_cffi import requests as cffi_requests
 import json
 
 # ---------------------------------------------------------
-# 1. FLASK KEEP-ALIVE SERVER (Render 7/24 Aktiflik İçin)
+# 1. FLASK KEEP-ALIVE SERVER
 # ---------------------------------------------------------
 app = Flask('')
 
@@ -33,7 +33,7 @@ intents = discord.Intents.default()
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 # ---------------------------------------------------------
-# 3. VERİ FORMATLAMA (JSON DEĞİL, DÜZ METİN)
+# 3. VERİ FORMATLAMA (DÜZ METİN)
 # ---------------------------------------------------------
 def format_data(obj, indent=0):
     lines = []
@@ -79,17 +79,7 @@ class SorguModal(Modal):
         if self.param_type == "discord_id":
             target_url = f"https://discordlookup.mesavirep.xyz/v1/user/{val}"
         elif self.param_type == "ip":
-            target_url = f"https://ipapi.co/{val}/json/"
-        elif self.param_type == "disabled":
-            content = "⚠️ **Bu özellik şu an kullanılamıyor.** API hizmeti mevcut değil."
-            embed = discord.Embed(
-                title=f"📋 {self.title} Sonucu",
-                description=content,
-                color=discord.Color.blue()
-            )
-            embed.set_footer(text=f"Sorgulayan: {interaction.user.name} • Sadece size özel görünür.")
-            await interaction.followup.send(embed=embed, ephemeral=True)
-            return
+            target_url = f"http://ip-api.com/json/{val}?lang=tr"
         else:
             target_url = f"{self.api_url}{val}"
 
@@ -137,66 +127,20 @@ class SorguModal(Modal):
         await interaction.followup.send(embed=embed, ephemeral=True)
 
 # ---------------------------------------------------------
-# 5. BUTON MENÜSÜ (RENKLER AYNI, SADECE API'LER DEĞİŞTİ)
+# 5. BUTON MENÜSÜ (SADECE ÇALIŞANLAR)
 # ---------------------------------------------------------
 class SorguPaneliView(View):
     def __init__(self):
         super().__init__(timeout=None)
 
-        # --- 1. SATIR: MAVİ BUTONLAR ---
+        # --- SADECE ÇALIŞAN BUTONLAR ---
         btn_dc_id = Button(label="Discord ID", style=ButtonStyle.primary, row=0, custom_id="btn_dc_id")
         btn_dc_id.callback = lambda i: self.open_modal(i, "Discord ID Sorgu", "Discord ID", "", "discord_id")
         self.add_item(btn_dc_id)
 
-        btn_dc_mail = Button(label="Discord Mail", style=ButtonStyle.primary, row=0, custom_id="btn_dc_mail")
-        btn_dc_mail.callback = lambda i: self.open_modal(i, "Discord Mail Sorgu", "E-Mail Adresi", "", "disabled")
-        self.add_item(btn_dc_mail)
-
-        btn_iban = Button(label="IBAN Sorgu", style=ButtonStyle.primary, row=0, custom_id="btn_iban")
-        btn_iban.callback = lambda i: self.open_modal(i, "Güncel IBAN Sorgu", "IBAN Numarası", "", "disabled")
-        self.add_item(btn_iban)
-
-        btn_sms = Button(label="SMS Bomber", style=ButtonStyle.primary, row=0, custom_id="btn_sms")
-        btn_sms.callback = lambda i: self.open_modal(i, "SMS Bomber", "Telefon Numarası (GSM)", "", "disabled")
-        self.add_item(btn_sms)
-
         btn_ip = Button(label="IP Sorgu", style=ButtonStyle.primary, row=0, custom_id="btn_ip")
         btn_ip.callback = lambda i: self.open_modal(i, "IP Sorgu", "IP Adresi", "", "ip")
         self.add_item(btn_ip)
-
-        # --- 2. SATIR: YEŞİL BUTONLAR (TÜMÜ DEVRE DIŞI) ---
-        btn_tc = Button(label="TC Sorgu", style=ButtonStyle.success, row=1, custom_id="btn_tc")
-        btn_tc.callback = lambda i: self.open_modal(i, "TC Sorgu", "TC Kimlik No", "", "disabled")
-        self.add_item(btn_tc)
-
-        btn_aile = Button(label="Aile Sorgu", style=ButtonStyle.success, row=1, custom_id="btn_aile")
-        btn_aile.callback = lambda i: self.open_modal(i, "Aile Sorgu", "TC Kimlik No", "", "disabled")
-        self.add_item(btn_aile)
-
-        btn_sulale = Button(label="Sülale Sorgu", style=ButtonStyle.success, row=1, custom_id="btn_sulale")
-        btn_sulale.callback = lambda i: self.open_modal(i, "Sülale Sorgu", "TC Kimlik No", "", "disabled")
-        self.add_item(btn_sulale)
-
-        btn_cocuk = Button(label="Çocuk Sorgu", style=ButtonStyle.success, row=1, custom_id="btn_cocuk")
-        btn_cocuk.callback = lambda i: self.open_modal(i, "Çocuk Sorgu", "TC Kimlik No", "", "disabled")
-        self.add_item(btn_cocuk)
-
-        btn_adres = Button(label="Adres Sorgu", style=ButtonStyle.success, row=1, custom_id="btn_adres")
-        btn_adres.callback = lambda i: self.open_modal(i, "Adres Sorgu", "TC Kimlik No", "", "disabled")
-        self.add_item(btn_adres)
-
-        # --- 3. SATIR: KIRMIZI BUTONLAR (TÜMÜ DEVRE DIŞI) ---
-        btn_isyeri = Button(label="İşyeri Sorgu", style=ButtonStyle.danger, row=2, custom_id="btn_isyeri")
-        btn_isyeri.callback = lambda i: self.open_modal(i, "İşyeri Sorgu", "TC Kimlik No", "", "disabled")
-        self.add_item(btn_isyeri)
-
-        btn_gsmtc = Button(label="GSM -> TC", style=ButtonStyle.danger, row=2, custom_id="btn_gsmtc")
-        btn_gsmtc.callback = lambda i: self.open_modal(i, "GSM'den TC Sorgu", "GSM / Telefon No", "", "disabled")
-        self.add_item(btn_gsmtc)
-
-        btn_tcgsm = Button(label="TC -> GSM", style=ButtonStyle.danger, row=2, custom_id="btn_tcgsm")
-        btn_tcgsm.callback = lambda i: self.open_modal(i, "TC'den GSM Sorgu", "TC Kimlik No", "", "disabled")
-        self.add_item(btn_tcgsm)
 
     async def open_modal(self, interaction: discord.Interaction, title: str, label: str, api_url: str, param_type: str):
         modal = SorguModal(title_name=title, label_name=label, api_url=api_url, param_type=param_type)
