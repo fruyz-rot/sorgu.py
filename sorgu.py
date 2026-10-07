@@ -1,6 +1,5 @@
 import os
 import threading
-import json
 import aiohttp
 import discord
 from discord.ext import commands
@@ -32,7 +31,29 @@ intents = discord.Intents.default()
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 # ---------------------------------------------------------
-# 3. MODAL (Giriş Kutusu & API Sorgusu)
+# 3. VERİ FORMATLAMA FONKSİYONU
+# ---------------------------------------------------------
+def format_data(obj, indent=0):
+    lines = []
+    prefix = "  " * indent
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            key_clean = str(k).replace("_", " ").replace("-", " ").title()
+            if isinstance(v, (dict, list)):
+                lines.append(f"{prefix}🔹 **{key_clean}:**")
+                lines.append(format_data(v, indent + 1))
+            else:
+                lines.append(f"{prefix}• **{key_clean}:** {v}")
+    elif isinstance(obj, list):
+        for idx, item in enumerate(obj, 1):
+            lines.append(f"{prefix}📌 **Kayıt #{idx}**")
+            lines.append(format_data(item, indent + 1))
+    else:
+        lines.append(f"{prefix}{obj}")
+    return "\n".join(lines)
+
+# ---------------------------------------------------------
+# 4. MODAL (Giriş Kutusu & API Sorgusu)
 # ---------------------------------------------------------
 class SorguModal(Modal):
     def __init__(self, title_name: str, label_name: str, api_url: str, param_type: str):
@@ -49,39 +70,46 @@ class SorguModal(Modal):
         self.add_item(self.user_input)
 
     async def on_submit(self, interaction: discord.Interaction):
-        # Sonucun SADECE sorguyu yapana görünmesi için ephemeral=True
         await interaction.response.defer(ephemeral=True)
         
         val = self.user_input.value.strip()
         
-        # IP Sorgu formatı için özel kontrol
         if self.param_type == "ip":
             target_url = f"https://freegeoip.app/json/{val}"
         else:
             target_url = f"{self.api_url}{val}"
 
+        # 403 Hatasını Önlemek İçin Chrome Tarayıcı Başlığı (User-Agent)
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+            "Accept-Language": "tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7"
+        }
+
         try:
-            async with aiohttp.ClientSession() as session:
+            async with aiohttp.ClientSession(headers=headers) as session:
                 async with session.get(target_url, timeout=15) as resp:
                     if resp.status == 200:
                         try:
                             data = await resp.json()
-                            formatted_res = json.dumps(data, indent=2, ensure_ascii=False)
-                            if len(formatted_res) > 1900:
-                                formatted_res = formatted_res[:1900] + "\n... (Veri Çok Uzun)"
-                            content = f"```json\n{formatted_res}\n```"
+                            formatted_text = format_data(data)
+                            
+                            if not formatted_text.strip():
+                                content = "❌ Sorgu tamamlandı fakat herhangi bir kayıt bulunamadı."
+                            elif len(formatted_text) > 3900:
+                                content = formatted_text[:3900] + "\n\n*(Sonuç çok uzun olduğu için kısaltıldı)*"
+                            else:
+                                content = formatted_text
                         except Exception:
                             text = await resp.text()
-                            if len(text) > 1900:
-                                text = text[:1900] + "\n..."
-                            content = f"```\n{text}\n```"
+                            content = f"```\n{text[:1900]}\n```"
                     else:
                         content = f"⚠️ API İsteği Başarısız Oldu! Kod: {resp.status}"
         except Exception as e:
-            content = f"❌ API bağlantısında hata oluştu:\n`{str(e)}`"
+            content = f"❌ API bağlantısı sırasında hata oluştu:\n`{str(e)}`"
 
         embed = discord.Embed(
-            title=f"📊 {self.title} Sonucu",
+            title=f"📋 {self.title} Sonucu",
             description=content,
             color=discord.Color.blue()
         )
@@ -90,14 +118,13 @@ class SorguModal(Modal):
         await interaction.followup.send(embed=embed, ephemeral=True)
 
 # ---------------------------------------------------------
-# 4. BUTON MENÜSÜ VE FARKLI SATIR RENKLERİ
+# 5. BUTON MENÜSÜ VE FARKLI SATIR RENKLERİ
 # ---------------------------------------------------------
 class SorguPaneliView(View):
     def __init__(self):
-        super().__init__(timeout=None) # Butonlar kalıcı
+        super().__init__(timeout=None)
 
-        # --- 1. SATIR: MAVİ BUTONLAR (ButtonStyle.primary) ---
-        
+        # --- 1. SATIR: MAVİ BUTONLAR ---
         btn_dc_id = Button(label="Discord ID", style=ButtonStyle.primary, row=0, custom_id="btn_dc_id")
         btn_dc_id.callback = lambda i: self.open_modal(i, "Discord ID Sorgu", "Discord ID", "https://sanchez.tr/api/discord.php?id=", "id")
         self.add_item(btn_dc_id)
@@ -118,8 +145,7 @@ class SorguPaneliView(View):
         btn_ip.callback = lambda i: self.open_modal(i, "IP Sorgu", "IP Adresi", "https://freegeoip.app/json/", "ip")
         self.add_item(btn_ip)
 
-        # --- 2. SATIR: YEŞİL BUTONLAR (ButtonStyle.success) ---
-
+        # --- 2. SATIR: YEŞİL BUTONLAR ---
         btn_tc = Button(label="TC Sorgu", style=ButtonStyle.success, row=1, custom_id="btn_tc")
         btn_tc.callback = lambda i: self.open_modal(i, "TC Sorgu", "TC Kimlik No", "http://sanchez.tr/api/tc.php?tc=", "tc")
         self.add_item(btn_tc)
@@ -140,8 +166,7 @@ class SorguPaneliView(View):
         btn_adres.callback = lambda i: self.open_modal(i, "Adres Sorgu", "TC Kimlik No", "http://sanchez.tr/api/adres.php?tc=", "tc")
         self.add_item(btn_adres)
 
-        # --- 3. SATIR: KIRMIZI BUTONLAR (ButtonStyle.danger) ---
-
+        # --- 3. SATIR: KIRMIZI BUTONLAR ---
         btn_isyeri = Button(label="İşyeri Sorgu", style=ButtonStyle.danger, row=2, custom_id="btn_isyeri")
         btn_isyeri.callback = lambda i: self.open_modal(i, "İşyeri Sorgu", "TC Kimlik No", "http://sanchez.tr/api/isyeri.php?tc=", "tc")
         self.add_item(btn_isyeri)
@@ -159,19 +184,18 @@ class SorguPaneliView(View):
         await interaction.response.send_modal(modal)
 
 # ---------------------------------------------------------
-# 5. KOMUTLAR VE BAŞLATMA
+# 6. KOMUTLAR VE BAŞLATMA
 # ---------------------------------------------------------
 @bot.event
 async def on_ready():
     print(f"[{bot.user}] Sistem aktif!")
-    bot.add_view(SorguPaneliView()) # Butonların kalıcı olması için ekleme
+    bot.add_view(SorguPaneliView())
     try:
         synced = await bot.tree.sync()
         print(f"{len(synced)} slash komut eşitlendi.")
     except Exception as e:
         print(f"Komut eşitleme hatası: {e}")
 
-# YÖNETİCİ KONTROLLÜ SLASH KOMUTU (/sorgula)
 @bot.tree.command(name="sorgula", description="Sorgu panelini kanala gönderir (Sadece Admin).")
 @app_commands.checks.has_permissions(administrator=True)
 async def sorgula(interaction: discord.Interaction):
@@ -183,14 +207,12 @@ async def sorgula(interaction: discord.Interaction):
         ),
         color=discord.Color.gold()
     )
-    if interaction.guild.icon:
+    if interaction.guild and interaction.guild.icon:
         embed.set_thumbnail(url=interaction.guild.icon.url)
     embed.set_footer(text="Sorgu Sistemi • 7/24 Aktif")
 
-    # Menüyü chate HERKESE AÇIK şekilde atar
     await interaction.response.send_message(embed=embed, view=SorguPaneliView())
 
-# Admin olmayan biri /sorgula yazmaya çalışırsa vereceği hata
 @sorgula.error
 async def sorgula_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
     if isinstance(error, app_commands.MissingPermissions):
@@ -200,6 +222,6 @@ async def sorgula_error(interaction: discord.Interaction, error: app_commands.Ap
         )
 
 if __name__ == "__main__":
-    keep_alive() # Web Service başlatır
+    keep_alive()
     TOKEN = os.environ.get("DISCORD_TOKEN") or "DISCORD_BOT_TOKEN_BURAYA"
     bot.run(TOKEN)
