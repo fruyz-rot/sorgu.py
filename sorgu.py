@@ -6,6 +6,7 @@ from discord import app_commands, ButtonStyle, TextStyle
 from discord.ui import Button, View, Modal, TextInput
 from flask import Flask
 from curl_cffi import requests as cffi_requests
+import requests
 import json
 
 # ---------------------------------------------------------
@@ -76,10 +77,10 @@ class SorguModal(Modal):
         content = ""
 
         try:
-            # --- Discord ID Sorgu ---
+            # --- Discord ID Sorgu (requests kullanılıyor, curl_cffi değil) ---
             if self.param_type == "discord_id":
                 url = f"https://discordlookup.mesavirep.xyz/v1/user/{val}"
-                resp = cffi_requests.get(url, impersonate="chrome124", timeout=20)
+                resp = requests.get(url, timeout=20)
                 if resp.status_code == 200:
                     content = format_data(resp.json())
                 else:
@@ -88,7 +89,7 @@ class SorguModal(Modal):
             # --- IP Sorgu (VPN/Proxy Tespiti) ---
             elif self.param_type == "ip":
                 url = f"http://ip-api.com/json/{val}?fields=status,message,country,regionName,city,isp,org,as,proxy,hosting,query"
-                resp = cffi_requests.get(url, timeout=20)
+                resp = requests.get(url, timeout=20)
                 if resp.status_code == 200:
                     content = format_data(resp.json())
                 else:
@@ -97,7 +98,7 @@ class SorguModal(Modal):
             # --- E-posta İhlal Sorgusu ---
             elif self.param_type == "email_breach":
                 url = f"https://api.xposedornot.com/v1/check-email/{val}"
-                resp = cffi_requests.get(url, timeout=20)
+                resp = requests.get(url, timeout=20)
                 if resp.status_code == 200:
                     data = resp.json()
                     breaches = data.get("breaches", [])
@@ -110,11 +111,10 @@ class SorguModal(Modal):
                 else:
                     content = f"⚠️ API Hatası: {resp.status_code}"
 
-            # --- Telefon Numarası Sorgusu (PhoneInfoga) ---
+            # --- Telefon Numarası Sorgusu ---
             elif self.param_type == "phone":
-                # PhoneInfoga REST API (Apify üzerinden ücretsiz)
                 url = f"https://api.apify.com/v2/acts/phoneinfoga~phone-number-osint-scanner/run-sync-get-dataset-items?token=FREE_TOKEN&phone={val}"
-                resp = cffi_requests.get(url, timeout=30)
+                resp = requests.get(url, timeout=30)
                 if resp.status_code == 200:
                     data = resp.json()
                     if data:
@@ -124,12 +124,10 @@ class SorguModal(Modal):
                 else:
                     content = f"⚠️ API Hatası: {resp.status_code}"
 
-            # --- Kullanıcı Adı Sorgusu (Maigret / OSINT-web-mcp) ---
+            # --- Kullanıcı Adı Sorgusu ---
             elif self.param_type == "username":
-                # Örnek: osint-web-mcp'nin kullanıcı adı arama endpoint'i
-                # Gerçek bir API olmadığı için GitHub üzerinden örnek gösterim
                 url = f"https://api.osint-web-mcp.com/search?username={val}"
-                resp = cffi_requests.get(url, timeout=20)
+                resp = requests.get(url, timeout=20)
                 if resp.status_code == 200:
                     content = format_data(resp.json())
                 else:
