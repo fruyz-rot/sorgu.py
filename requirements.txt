@@ -1,0 +1,5 @@
+discord.py
+Flask
+aiohttp
+requests
+gunicorn
