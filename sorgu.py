@@ -76,17 +76,36 @@ class SorguModal(Modal):
         content = ""
 
         try:
-            async with httpx.AsyncClient() as client:
-                # --- Discord ID Sorgu ---
+            # httpx istemcisi (verify=False ile SSL sorunlarını aş)
+            async with httpx.AsyncClient(verify=False) as client:
+                # --- Discord ID Sorgu (Resmi Discord API) ---
                 if self.param_type == "discord_id":
-                    url = f"https://discordlookup.mesavirep.xyz/v1/user/{val}"
-                    resp = await client.get(url, timeout=20)
-                    if resp.status_code == 200:
-                        content = format_data(resp.json())
+                    token = os.environ.get("DISCORD_BOT_TOKEN", "")
+                    if not token:
+                        content = "❌ Bot token'ı ayarlanmamış. Lütfen DISCORD_BOT_TOKEN ortam değişkenini ekleyin."
                     else:
-                        content = f"⚠️ API Hatası: {resp.status_code}"
+                        url = f"https://discord.com/api/v10/users/{val}"
+                        headers = {
+                            "Authorization": f"Bot {token}",
+                            "Content-Type": "application/json"
+                        }
+                        resp = await client.get(url, headers=headers, timeout=20)
+                        if resp.status_code == 200:
+                            data = resp.json()
+                            # Sadece istenen alanları göster
+                            filtered = {
+                                "ID": data.get("id"),
+                                "Kullanıcı Adı": data.get("username"),
+                                "Ayırıcı": data.get("discriminator"),
+                                "Global Ad": data.get("global_name"),
+                                "Bot mu": data.get("bot"),
+                                "Avatar Hash": data.get("avatar")
+                            }
+                            content = format_data(filtered)
+                        else:
+                            content = f"⚠️ API Hatası: {resp.status_code}"
                 
-                # --- IP Sorgu (VPN/Proxy Tespiti) ---
+                # --- IP Sorgu ---
                 elif self.param_type == "ip":
                     url = f"http://ip-api.com/json/{val}?fields=status,message,country,regionName,city,isp,org,as,proxy,hosting,query"
                     resp = await client.get(url, timeout=20)
@@ -95,7 +114,7 @@ class SorguModal(Modal):
                     else:
                         content = f"⚠️ API Hatası: {resp.status_code}"
 
-                # --- E-posta İhlal Sorgusu ---
+                # --- E-posta İhlal ---
                 elif self.param_type == "email_breach":
                     url = f"https://api.xposedornot.com/v1/check-email/{val}"
                     resp = await client.get(url, timeout=20)
@@ -111,7 +130,7 @@ class SorguModal(Modal):
                     else:
                         content = f"⚠️ API Hatası: {resp.status_code}"
 
-                # --- Telefon Numarası Sorgusu ---
+                # --- Telefon Sorgu ---
                 elif self.param_type == "phone":
                     url = f"https://api.apify.com/v2/acts/phoneinfoga~phone-number-osint-scanner/run-sync-get-dataset-items?token=FREE_TOKEN&phone={val}"
                     resp = await client.get(url, timeout=30)
@@ -124,7 +143,7 @@ class SorguModal(Modal):
                     else:
                         content = f"⚠️ API Hatası: {resp.status_code}"
 
-                # --- Kullanıcı Adı Sorgusu ---
+                # --- Kullanıcı Adı Sorgu ---
                 elif self.param_type == "username":
                     url = f"https://api.osint-web-mcp.com/search?username={val}"
                     resp = await client.get(url, timeout=20)
@@ -219,5 +238,5 @@ async def sorgula_error(interaction: discord.Interaction, error: app_commands.Ap
 
 if __name__ == "__main__":
     keep_alive()
-    TOKEN = os.environ.get("DISCORD_TOKEN") or "DISCORD_BOT_TOKEN_BURAYA"
+    TOKEN = os.environ.get("DISCORD_BOT_TOKEN") or "DISCORD_BOT_TOKEN_BURAYA"
     bot.run(TOKEN)
