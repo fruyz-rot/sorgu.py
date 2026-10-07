@@ -55,7 +55,7 @@ def format_data(obj, indent=0):
     return "\n".join(lines)
 
 # ---------------------------------------------------------
-# 4. MODAL (Giriş Kutusu & API Sorgusu) - curl_cffi ile
+# 4. MODAL (Giriş Kutusu & API Sorgusu) - Tam Çözüm
 # ---------------------------------------------------------
 class SorguModal(Modal):
     def __init__(self, title_name: str, label_name: str, api_url: str, param_type: str):
@@ -81,14 +81,31 @@ class SorguModal(Modal):
         else:
             target_url = f"{self.api_url}{val}"
 
+        # TAM HEADER SETİ (Gerçek Chrome gibi görünmek için)
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+            "Accept": "application/json, text/plain, */*",
+            "Accept-Language": "tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7",
+            "Accept-Encoding": "gzip, deflate, br",
+            "Referer": "https://sanchez.tr/",
+            "Origin": "https://sanchez.tr",
+            "Sec-Fetch-Dest": "empty",
+            "Sec-Fetch-Mode": "cors",
+            "Sec-Fetch-Site": "same-origin",
+            "Sec-Ch-Ua": '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
+            "Sec-Ch-Ua-Mobile": "?0",
+            "Sec-Ch-Ua-Platform": '"Windows"',
+            "Connection": "keep-alive"
+        }
+
         try:
+            # Chrome 124 taklidi, Cloudflare'i en iyi aşan sürüm
             resp = cffi_requests.get(
                 target_url,
-                impersonate="chrome120",
-                timeout=15,
-                headers={
-                    "Accept-Language": "tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7"
-                }
+                impersonate="chrome124",
+                headers=headers,
+                timeout=20,
+                allow_redirects=True
             )
             status = resp.status_code
             text = resp.text
