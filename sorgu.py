@@ -5,7 +5,8 @@ from discord.ext import commands
 from discord import app_commands, ButtonStyle, TextStyle
 from discord.ui import Button, View, Modal, TextInput
 from flask import Flask
-import httpx
+import aiohttp
+import ssl
 import json
 
 # ---------------------------------------------------------
@@ -32,7 +33,14 @@ intents = discord.Intents.default()
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 # ---------------------------------------------------------
-# 3. VERİ FORMATLAMA
+# 3. SSL CONTEXT (SNI HATASINI AŞMAK İÇİN)
+# ---------------------------------------------------------
+ssl_context = ssl.create_default_context()
+ssl_context.check_hostname = False
+ssl_context.verify_mode = ssl.CERT_NONE
+
+# ---------------------------------------------------------
+# 4. VERİ FORMATLAMA
 # ---------------------------------------------------------
 def format_data(obj, indent=0):
     lines = []
@@ -54,7 +62,7 @@ def format_data(obj, indent=0):
     return "\n".join(lines)
 
 # ---------------------------------------------------------
-# 4. MODAL
+# 5. MODAL
 # ---------------------------------------------------------
 class SorguModal(Modal):
     def __init__(self, title_name: str, label_name: str, param_type: str):
@@ -76,81 +84,97 @@ class SorguModal(Modal):
         content = ""
 
         try:
-            # httpx istemcisi (verify=False ile SSL sorunlarını aş)
-            async with httpx.AsyncClient(verify=False) as client:
+            async with aiohttp.ClientSession() as session:
                 # --- Discord ID Sorgu (Resmi Discord API) ---
                 if self.param_type == "discord_id":
                     token = os.environ.get("DISCORD_BOT_TOKEN", "")
                     if not token:
-                        content = "❌ Bot token'ı ayarlanmamış. Lütfen DISCORD_BOT_TOKEN ortam değişkenini ekleyin."
+                        content = "❌ Bot token'ı ayarlanmamış."
                     else:
                         url = f"https://discord.com/api/v10/users/{val}"
-                        headers = {
-                            "Authorization": f"Bot {token}",
-                            "Content-Type": "application/json"
-                        }
-                        resp = await client.get(url, headers=headers, timeout=20)
-                        if resp.status_code == 200:
-                            data = resp.json()
-                            # Sadece istenen alanları göster
-                            filtered = {
-                                "ID": data.get("id"),
-                                "Kullanıcı Adı": data.get("username"),
-                                "Ayırıcı": data.get("discriminator"),
-                                "Global Ad": data.get("global_name"),
-                                "Bot mu": data.get("bot"),
-                                "Avatar Hash": data.get("avatar")
-                            }
-                            content = format_data(filtered)
-                        else:
-                            content = f"⚠️ API Hatası: {resp.status_code}"
-                
-                # --- IP Sorgu ---
+                        headers = {"Authorization": f"Bot {token}"}
+                        async with session.get(url, headers=headers, ssl=ssl_context, timeout=20) as resp:
+                            if resp.status == 200:
+                                data = await resp.json()
+                                filtered = {
+                                    "ID": data.get("id"),
+                                    "Kullanıcı Adı": data.get("username"),
+                                    "Ayırıcı": data.get("discriminator"),
+                                    "Global Ad": data.get("global_name"),
+                                    "Bot mu": data.get("bot"),
+                                    "Avatar Hash": data.get("avatar")
+                                }
+                                content = format_data(filtered)
+                            else:
+                                content = f"⚠️ API Hatası: {resp.status}"
+
+                # --- IP Sorgu (VPN/Proxy Tespiti) ---
                 elif self.param_type == "ip":
                     url = f"http://ip-api.com/json/{val}?fields=status,message,country,regionName,city,isp,org,as,proxy,hosting,query"
-                    resp = await client.get(url, timeout=20)
-                    if resp.status_code == 200:
-                        content = format_data(resp.json())
-                    else:
-                        content = f"⚠️ API Hatası: {resp.status_code}"
+                    async with session.get(url, ssl=ssl_context, timeout=20) as resp:
+                        if resp.status == 200:
+                            content = format_data(await resp.json())
+                        else:
+                            content = f"⚠️ API Hatası: {resp.status}"
 
-                # --- E-posta İhlal ---
+                # --- E-posta İhlal Sorgusu ---
                 elif self.param_type == "email_breach":
                     url = f"https://api.xposedornot.com/v1/check-email/{val}"
-                    resp = await client.get(url, timeout=20)
-                    if resp.status_code == 200:
-                        data = resp.json()
-                        breaches = data.get("breaches", [])
-                        if breaches:
-                            content = f"**{val}** adresi şu ihlallerde bulundu:\n\n" + "\n".join([f"• {b}" for b in breaches])
-                        else:
+                    async with session.get(url, ssl=ssl_context, timeout=20) as resp:
+                        if resp.status == 200:
+                            data = await resp.json()
+                            breaches = data.get("breaches", [])
+                            if breaches:
+                                content = f"**{val}** adresi şu ihlallerde bulundu:\n\n" + "\n".join([f"• {b}" for b in breaches])
+                            else:
+                                content = f"✅ **{val}** hiçbir bilinen ihlalde bulunamadı."
+                        elif resp.status == 404:
                             content = f"✅ **{val}** hiçbir bilinen ihlalde bulunamadı."
-                    elif resp.status_code == 404:
-                        content = f"✅ **{val}** hiçbir bilinen ihlalde bulunamadı."
-                    else:
-                        content = f"⚠️ API Hatası: {resp.status_code}"
-
-                # --- Telefon Sorgu ---
-                elif self.param_type == "phone":
-                    url = f"https://api.apify.com/v2/acts/phoneinfoga~phone-number-osint-scanner/run-sync-get-dataset-items?token=FREE_TOKEN&phone={val}"
-                    resp = await client.get(url, timeout=30)
-                    if resp.status_code == 200:
-                        data = resp.json()
-                        if data:
-                            content = format_data(data[0])
                         else:
-                            content = "❌ Sonuç bulunamadı."
-                    else:
-                        content = f"⚠️ API Hatası: {resp.status_code}"
+                            content = f"⚠️ API Hatası: {resp.status}"
 
-                # --- Kullanıcı Adı Sorgu ---
-                elif self.param_type == "username":
-                    url = f"https://api.osint-web-mcp.com/search?username={val}"
-                    resp = await client.get(url, timeout=20)
-                    if resp.status_code == 200:
-                        content = format_data(resp.json())
+                # --- Telefon Numarası Sorgu (PhoneInfoga - Apify) ---
+                elif self.param_type == "phone":
+                    token = os.environ.get("APIFY_TOKEN", "")
+                    if not token:
+                        content = "❌ Apify token'ı ayarlanmamış. Render'da APIFY_TOKEN ekle."
                     else:
-                        content = f"⚠️ API Hatası: {resp.status_code}"
+                        url = f"https://api.apify.com/v2/acts/phoneinfoga~phone-number-osint-scanner/run-sync-get-dataset-items?token={token}&phone={val}"
+                        async with session.get(url, ssl=ssl_context, timeout=60) as resp:
+                            if resp.status == 200:
+                                data = await resp.json()
+                                if data:
+                                    content = format_data(data[0])
+                                else:
+                                    content = "❌ Sonuç bulunamadı."
+                            else:
+                                content = f"⚠️ API Hatası: {resp.status}"
+
+                # --- Kullanıcı Adı Sorgu (Sherlock - OSINT) ---
+                elif self.param_type == "username":
+                    url = f"https://sherlock.nuro.dev/{val}"
+                    headers = {"Accept": "application/json"}
+                    async with session.get(url, headers=headers, ssl=ssl_context, timeout=30) as resp:
+                        if resp.status == 200:
+                            data = await resp.json()
+                            # Sherlock cevabı içindeki bulunan siteleri filtrele
+                            found = {}
+                            raw_data = data.get("data", data)
+                            if isinstance(raw_data, dict):
+                                for site, info in raw_data.items():
+                                    if isinstance(info, dict):
+                                        status = info.get("status", "")
+                                        if status in ("found", "Claimed"):
+                                            found[site] = info.get("url", info.get("url_main", ""))
+                            if found:
+                                content = f"**{val}** kullanıcı adı şu platformlarda bulundu:\n\n"
+                                content += "\n".join([f"• **{site}:** {url}" for site, url in list(found.items())[:30]])
+                                if len(found) > 30:
+                                    content += f"\n\n*(Toplam {len(found)} sonuç, ilk 30 gösteriliyor)*"
+                            else:
+                                content = f"❌ **{val}** kullanıcı adı hiçbir platformda bulunamadı."
+                        else:
+                            content = f"⚠️ API Hatası: {resp.status}"
 
         except Exception as e:
             content = f"❌ Hata: `{str(e)}`"
@@ -164,7 +188,7 @@ class SorguModal(Modal):
         await interaction.followup.send(embed=embed, ephemeral=True)
 
 # ---------------------------------------------------------
-# 5. BUTONLAR
+# 6. BUTONLAR
 # ---------------------------------------------------------
 class SorguPaneliView(View):
     def __init__(self):
@@ -187,10 +211,10 @@ class SorguPaneliView(View):
 
         # Telefon Numarası Sorgu
         btn_phone = Button(label="Telefon Sorgu", style=ButtonStyle.success, row=1, custom_id="btn_phone")
-        btn_phone.callback = lambda i: self.open_modal(i, "Telefon Numarası Sorgu", "Telefon Numarası (Uluslararası Format)", "phone")
+        btn_phone.callback = lambda i: self.open_modal(i, "Telefon Numarası Sorgu", "Telefon Numarası (+12128148373 gibi)", "phone")
         self.add_item(btn_phone)
 
-        # Kullanıcı Adı Sorgu
+        # Kullanıcı Adı Sorgu (OSINT)
         btn_username = Button(label="Kullanıcı Adı Sorgu", style=ButtonStyle.success, row=1, custom_id="btn_username")
         btn_username.callback = lambda i: self.open_modal(i, "Kullanıcı Adı Sorgu", "Kullanıcı Adı", "username")
         self.add_item(btn_username)
@@ -200,7 +224,7 @@ class SorguPaneliView(View):
         await interaction.response.send_modal(modal)
 
 # ---------------------------------------------------------
-# 6. KOMUTLAR
+# 7. KOMUTLAR
 # ---------------------------------------------------------
 @bot.event
 async def on_ready():
