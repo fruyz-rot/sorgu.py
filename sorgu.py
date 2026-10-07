@@ -6,6 +6,8 @@ from discord.ext import commands
 from discord import app_commands, ButtonStyle, TextStyle
 from discord.ui import Button, View, Modal, TextInput
 from flask import Flask
+from curl_cffi import requests as cffi_requests
+import json
 
 # ---------------------------------------------------------
 # 1. FLASK KEEP-ALIVE SERVER (Render 7/24 Aktiflik İçin)
@@ -53,7 +55,7 @@ def format_data(obj, indent=0):
     return "\n".join(lines)
 
 # ---------------------------------------------------------
-# 4. MODAL (Giriş Kutusu & API Sorgusu)
+# 4. MODAL (Giriş Kutusu & API Sorgusu) - curl_cffi ile
 # ---------------------------------------------------------
 class SorguModal(Modal):
     def __init__(self, title_name: str, label_name: str, api_url: str, param_type: str):
@@ -79,32 +81,32 @@ class SorguModal(Modal):
         else:
             target_url = f"{self.api_url}{val}"
 
-        # 403 Hatasını Önlemek İçin Chrome Tarayıcı Başlığı (User-Agent)
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
-            "Accept-Language": "tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7"
-        }
-
         try:
-            async with aiohttp.ClientSession(headers=headers) as session:
-                async with session.get(target_url, timeout=15) as resp:
-                    if resp.status == 200:
-                        try:
-                            data = await resp.json()
-                            formatted_text = format_data(data)
-                            
-                            if not formatted_text.strip():
-                                content = "❌ Sorgu tamamlandı fakat herhangi bir kayıt bulunamadı."
-                            elif len(formatted_text) > 3900:
-                                content = formatted_text[:3900] + "\n\n*(Sonuç çok uzun olduğu için kısaltıldı)*"
-                            else:
-                                content = formatted_text
-                        except Exception:
-                            text = await resp.text()
-                            content = f"```\n{text[:1900]}\n```"
+            resp = cffi_requests.get(
+                target_url,
+                impersonate="chrome120",
+                timeout=15,
+                headers={
+                    "Accept-Language": "tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7"
+                }
+            )
+            status = resp.status_code
+            text = resp.text
+
+            if status == 200:
+                try:
+                    data = json.loads(text)
+                    formatted_text = format_data(data)
+                    if not formatted_text.strip():
+                        content = "❌ Sorgu tamamlandı fakat herhangi bir kayıt bulunamadı."
+                    elif len(formatted_text) > 3900:
+                        content = formatted_text[:3900] + "\n\n*(Sonuç çok uzun olduğu için kısaltıldı)*"
                     else:
-                        content = f"⚠️ API İsteği Başarısız Oldu! Kod: {resp.status}"
+                        content = formatted_text
+                except Exception:
+                    content = f"```\n{text[:1900]}\n```"
+            else:
+                content = f"⚠️ API İsteği Başarısız Oldu! Kod: {status}"
         except Exception as e:
             content = f"❌ API bağlantısı sırasında hata oluştu:\n`{str(e)}`"
 
