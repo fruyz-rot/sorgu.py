@@ -5,8 +5,7 @@ from discord.ext import commands
 from discord import app_commands, ButtonStyle, TextStyle
 from discord.ui import Button, View, Modal, TextInput
 from flask import Flask
-from curl_cffi import requests as cffi_requests
-import requests
+import cloudscraper
 import json
 
 # ---------------------------------------------------------
@@ -33,7 +32,18 @@ intents = discord.Intents.default()
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 # ---------------------------------------------------------
-# 3. VERİ FORMATLAMA
+# 3. CLOUDSCRAPER (TÜM İSTEKLER İÇİN ORTAK)
+# ---------------------------------------------------------
+scraper = cloudscraper.create_scraper(
+    browser={
+        'browser': 'chrome',
+        'platform': 'windows',
+        'mobile': False
+    }
+)
+
+# ---------------------------------------------------------
+# 4. VERİ FORMATLAMA
 # ---------------------------------------------------------
 def format_data(obj, indent=0):
     lines = []
@@ -55,7 +65,7 @@ def format_data(obj, indent=0):
     return "\n".join(lines)
 
 # ---------------------------------------------------------
-# 4. MODAL
+# 5. MODAL
 # ---------------------------------------------------------
 class SorguModal(Modal):
     def __init__(self, title_name: str, label_name: str, param_type: str):
@@ -77,10 +87,10 @@ class SorguModal(Modal):
         content = ""
 
         try:
-            # --- Discord ID Sorgu (requests kullanılıyor, curl_cffi değil) ---
+            # --- Discord ID Sorgu ---
             if self.param_type == "discord_id":
                 url = f"https://discordlookup.mesavirep.xyz/v1/user/{val}"
-                resp = requests.get(url, timeout=20)
+                resp = scraper.get(url, timeout=20)
                 if resp.status_code == 200:
                     content = format_data(resp.json())
                 else:
@@ -89,7 +99,7 @@ class SorguModal(Modal):
             # --- IP Sorgu (VPN/Proxy Tespiti) ---
             elif self.param_type == "ip":
                 url = f"http://ip-api.com/json/{val}?fields=status,message,country,regionName,city,isp,org,as,proxy,hosting,query"
-                resp = requests.get(url, timeout=20)
+                resp = scraper.get(url, timeout=20)
                 if resp.status_code == 200:
                     content = format_data(resp.json())
                 else:
@@ -98,7 +108,7 @@ class SorguModal(Modal):
             # --- E-posta İhlal Sorgusu ---
             elif self.param_type == "email_breach":
                 url = f"https://api.xposedornot.com/v1/check-email/{val}"
-                resp = requests.get(url, timeout=20)
+                resp = scraper.get(url, timeout=20)
                 if resp.status_code == 200:
                     data = resp.json()
                     breaches = data.get("breaches", [])
@@ -114,7 +124,7 @@ class SorguModal(Modal):
             # --- Telefon Numarası Sorgusu ---
             elif self.param_type == "phone":
                 url = f"https://api.apify.com/v2/acts/phoneinfoga~phone-number-osint-scanner/run-sync-get-dataset-items?token=FREE_TOKEN&phone={val}"
-                resp = requests.get(url, timeout=30)
+                resp = scraper.get(url, timeout=30)
                 if resp.status_code == 200:
                     data = resp.json()
                     if data:
@@ -127,7 +137,7 @@ class SorguModal(Modal):
             # --- Kullanıcı Adı Sorgusu ---
             elif self.param_type == "username":
                 url = f"https://api.osint-web-mcp.com/search?username={val}"
-                resp = requests.get(url, timeout=20)
+                resp = scraper.get(url, timeout=20)
                 if resp.status_code == 200:
                     content = format_data(resp.json())
                 else:
@@ -145,7 +155,7 @@ class SorguModal(Modal):
         await interaction.followup.send(embed=embed, ephemeral=True)
 
 # ---------------------------------------------------------
-# 5. BUTONLAR
+# 6. BUTONLAR
 # ---------------------------------------------------------
 class SorguPaneliView(View):
     def __init__(self):
@@ -181,7 +191,7 @@ class SorguPaneliView(View):
         await interaction.response.send_modal(modal)
 
 # ---------------------------------------------------------
-# 6. KOMUTLAR
+# 7. KOMUTLAR
 # ---------------------------------------------------------
 @bot.event
 async def on_ready():
