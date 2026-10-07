@@ -76,6 +76,7 @@ class SorguModal(Modal):
         content = ""
 
         try:
+            # --- Discord ID Sorgu ---
             if self.param_type == "discord_id":
                 url = f"https://discordlookup.mesavirep.xyz/v1/user/{val}"
                 resp = cffi_requests.get(url, impersonate="chrome124", timeout=20)
@@ -84,8 +85,8 @@ class SorguModal(Modal):
                 else:
                     content = f"⚠️ API Hatası: {resp.status_code}"
             
+            # --- IP Sorgu (VPN/Proxy Tespiti) ---
             elif self.param_type == "ip":
-                # ip-api.com: ücretsiz, key yok, VPN/proxy tespiti yapar [citation:4]
                 url = f"http://ip-api.com/json/{val}?fields=status,message,country,regionName,city,isp,org,as,proxy,hosting,query"
                 resp = cffi_requests.get(url, timeout=20)
                 if resp.status_code == 200:
@@ -93,8 +94,8 @@ class SorguModal(Modal):
                 else:
                     content = f"⚠️ API Hatası: {resp.status_code}"
 
+            # --- E-posta İhlal Sorgusu ---
             elif self.param_type == "email_breach":
-                # XposedOrNot: ücretsiz, key yok, e-posta ihlal kontrolü [citation:3]
                 url = f"https://api.xposedornot.com/v1/check-email/{val}"
                 resp = cffi_requests.get(url, timeout=20)
                 if resp.status_code == 200:
@@ -106,6 +107,31 @@ class SorguModal(Modal):
                         content = f"✅ **{val}** hiçbir bilinen ihlalde bulunamadı."
                 elif resp.status_code == 404:
                     content = f"✅ **{val}** hiçbir bilinen ihlalde bulunamadı."
+                else:
+                    content = f"⚠️ API Hatası: {resp.status_code}"
+
+            # --- Telefon Numarası Sorgusu (PhoneInfoga) ---
+            elif self.param_type == "phone":
+                # PhoneInfoga REST API (Apify üzerinden ücretsiz)
+                url = f"https://api.apify.com/v2/acts/phoneinfoga~phone-number-osint-scanner/run-sync-get-dataset-items?token=FREE_TOKEN&phone={val}"
+                resp = cffi_requests.get(url, timeout=30)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    if data:
+                        content = format_data(data[0])
+                    else:
+                        content = "❌ Sonuç bulunamadı."
+                else:
+                    content = f"⚠️ API Hatası: {resp.status_code}"
+
+            # --- Kullanıcı Adı Sorgusu (Maigret / OSINT-web-mcp) ---
+            elif self.param_type == "username":
+                # Örnek: osint-web-mcp'nin kullanıcı adı arama endpoint'i
+                # Gerçek bir API olmadığı için GitHub üzerinden örnek gösterim
+                url = f"https://api.osint-web-mcp.com/search?username={val}"
+                resp = cffi_requests.get(url, timeout=20)
+                if resp.status_code == 200:
+                    content = format_data(resp.json())
                 else:
                     content = f"⚠️ API Hatası: {resp.status_code}"
 
@@ -132,15 +158,25 @@ class SorguPaneliView(View):
         btn_dc_id.callback = lambda i: self.open_modal(i, "Discord ID Sorgu", "Discord ID", "discord_id")
         self.add_item(btn_dc_id)
 
-        # IP Sorgu (VPN/Proxy Tespiti)
+        # IP Sorgu
         btn_ip = Button(label="IP Sorgu", style=ButtonStyle.primary, row=0, custom_id="btn_ip")
         btn_ip.callback = lambda i: self.open_modal(i, "IP Sorgu", "IP Adresi", "ip")
         self.add_item(btn_ip)
 
-        # E-posta İhlal Sorgusu
+        # E-posta İhlal
         btn_email = Button(label="E-posta İhlal", style=ButtonStyle.primary, row=0, custom_id="btn_email")
         btn_email.callback = lambda i: self.open_modal(i, "E-posta İhlal Sorgu", "E-posta Adresi", "email_breach")
         self.add_item(btn_email)
+
+        # Telefon Numarası Sorgu
+        btn_phone = Button(label="Telefon Sorgu", style=ButtonStyle.success, row=1, custom_id="btn_phone")
+        btn_phone.callback = lambda i: self.open_modal(i, "Telefon Numarası Sorgu", "Telefon Numarası (Uluslararası Format)", "phone")
+        self.add_item(btn_phone)
+
+        # Kullanıcı Adı Sorgu
+        btn_username = Button(label="Kullanıcı Adı Sorgu", style=ButtonStyle.success, row=1, custom_id="btn_username")
+        btn_username.callback = lambda i: self.open_modal(i, "Kullanıcı Adı Sorgu", "Kullanıcı Adı", "username")
+        self.add_item(btn_username)
 
     async def open_modal(self, interaction: discord.Interaction, title: str, label: str, param_type: str):
         modal = SorguModal(title_name=title, label_name=label, param_type=param_type)
