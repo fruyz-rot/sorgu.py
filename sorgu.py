@@ -1,6 +1,5 @@
 import os
 import threading
-import aiohttp
 import discord
 from discord.ext import commands
 from discord import app_commands, ButtonStyle, TextStyle
@@ -10,7 +9,7 @@ from curl_cffi import requests as cffi_requests
 import json
 
 # ---------------------------------------------------------
-# 1. FLASK KEEP-ALIVE SERVER
+# 1. FLASK KEEP-ALIVE
 # ---------------------------------------------------------
 app = Flask('')
 
@@ -27,13 +26,13 @@ def keep_alive():
     t.start()
 
 # ---------------------------------------------------------
-# 2. DISCORD BOT AYARLARI
+# 2. BOT AYARLARI
 # ---------------------------------------------------------
 intents = discord.Intents.default()
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 # ---------------------------------------------------------
-# 3. VERİ FORMATLAMA (DÜZ METİN)
+# 3. VERİ FORMATLAMA
 # ---------------------------------------------------------
 def format_data(obj, indent=0):
     lines = []
@@ -58,9 +57,8 @@ def format_data(obj, indent=0):
 # 4. MODAL
 # ---------------------------------------------------------
 class SorguModal(Modal):
-    def __init__(self, title_name: str, label_name: str, api_url: str, param_type: str):
+    def __init__(self, title_name: str, label_name: str, param_type: str):
         super().__init__(title=title_name)
-        self.api_url = api_url
         self.param_type = param_type
         
         self.user_input = TextInput(
@@ -75,79 +73,81 @@ class SorguModal(Modal):
         await interaction.response.defer(ephemeral=True)
         
         val = self.user_input.value.strip()
-        
-        if self.param_type == "discord_id":
-            target_url = f"https://discordlookup.mesavirep.xyz/v1/user/{val}"
-        elif self.param_type == "ip":
-            target_url = f"http://ip-api.com/json/{val}?lang=tr"
-        else:
-            target_url = f"{self.api_url}{val}"
-
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-            "Accept": "application/json, text/plain, */*",
-            "Accept-Language": "tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7",
-        }
+        content = ""
 
         try:
-            resp = cffi_requests.get(
-                target_url,
-                impersonate="chrome124",
-                headers=headers,
-                timeout=20,
-                allow_redirects=True
-            )
-            status = resp.status_code
-            text = resp.text
+            if self.param_type == "discord_id":
+                url = f"https://discordlookup.mesavirep.xyz/v1/user/{val}"
+                resp = cffi_requests.get(url, impersonate="chrome124", timeout=20)
+                if resp.status_code == 200:
+                    content = format_data(resp.json())
+                else:
+                    content = f"⚠️ API Hatası: {resp.status_code}"
+            
+            elif self.param_type == "ip":
+                # ip-api.com: ücretsiz, key yok, VPN/proxy tespiti yapar [citation:4]
+                url = f"http://ip-api.com/json/{val}?fields=status,message,country,regionName,city,isp,org,as,proxy,hosting,query"
+                resp = cffi_requests.get(url, timeout=20)
+                if resp.status_code == 200:
+                    content = format_data(resp.json())
+                else:
+                    content = f"⚠️ API Hatası: {resp.status_code}"
 
-            if status == 200:
-                try:
-                    data = json.loads(text)
-                    formatted_text = format_data(data)
-                    if not formatted_text.strip():
-                        content = "❌ Sorgu tamamlandı fakat herhangi bir kayıt bulunamadı."
-                    elif len(formatted_text) > 3900:
-                        content = formatted_text[:3900] + "\n\n*(Sonuç çok uzun olduğu için kısaltıldı)*"
+            elif self.param_type == "email_breach":
+                # XposedOrNot: ücretsiz, key yok, e-posta ihlal kontrolü [citation:3]
+                url = f"https://api.xposedornot.com/v1/check-email/{val}"
+                resp = cffi_requests.get(url, timeout=20)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    breaches = data.get("breaches", [])
+                    if breaches:
+                        content = f"**{val}** adresi şu ihlallerde bulundu:\n\n" + "\n".join([f"• {b}" for b in breaches])
                     else:
-                        content = formatted_text
-                except Exception:
-                    content = f"```\n{text[:1900]}\n```"
-            else:
-                content = f"⚠️ API İsteği Başarısız Oldu! Kod: {status}"
+                        content = f"✅ **{val}** hiçbir bilinen ihlalde bulunamadı."
+                elif resp.status_code == 404:
+                    content = f"✅ **{val}** hiçbir bilinen ihlalde bulunamadı."
+                else:
+                    content = f"⚠️ API Hatası: {resp.status_code}"
+
         except Exception as e:
-            content = f"❌ API bağlantısı sırasında hata oluştu:\n`{str(e)}`"
+            content = f"❌ Hata: `{str(e)}`"
 
         embed = discord.Embed(
             title=f"📋 {self.title} Sonucu",
-            description=content,
+            description=content[:4000],
             color=discord.Color.blue()
         )
         embed.set_footer(text=f"Sorgulayan: {interaction.user.name} • Sadece size özel görünür.")
-        
         await interaction.followup.send(embed=embed, ephemeral=True)
 
 # ---------------------------------------------------------
-# 5. BUTON MENÜSÜ (SADECE ÇALIŞANLAR)
+# 5. BUTONLAR
 # ---------------------------------------------------------
 class SorguPaneliView(View):
     def __init__(self):
         super().__init__(timeout=None)
 
-        # --- SADECE ÇALIŞAN BUTONLAR ---
+        # Discord ID
         btn_dc_id = Button(label="Discord ID", style=ButtonStyle.primary, row=0, custom_id="btn_dc_id")
-        btn_dc_id.callback = lambda i: self.open_modal(i, "Discord ID Sorgu", "Discord ID", "", "discord_id")
+        btn_dc_id.callback = lambda i: self.open_modal(i, "Discord ID Sorgu", "Discord ID", "discord_id")
         self.add_item(btn_dc_id)
 
+        # IP Sorgu (VPN/Proxy Tespiti)
         btn_ip = Button(label="IP Sorgu", style=ButtonStyle.primary, row=0, custom_id="btn_ip")
-        btn_ip.callback = lambda i: self.open_modal(i, "IP Sorgu", "IP Adresi", "", "ip")
+        btn_ip.callback = lambda i: self.open_modal(i, "IP Sorgu", "IP Adresi", "ip")
         self.add_item(btn_ip)
 
-    async def open_modal(self, interaction: discord.Interaction, title: str, label: str, api_url: str, param_type: str):
-        modal = SorguModal(title_name=title, label_name=label, api_url=api_url, param_type=param_type)
+        # E-posta İhlal Sorgusu
+        btn_email = Button(label="E-posta İhlal", style=ButtonStyle.primary, row=0, custom_id="btn_email")
+        btn_email.callback = lambda i: self.open_modal(i, "E-posta İhlal Sorgu", "E-posta Adresi", "email_breach")
+        self.add_item(btn_email)
+
+    async def open_modal(self, interaction: discord.Interaction, title: str, label: str, param_type: str):
+        modal = SorguModal(title_name=title, label_name=label, param_type=param_type)
         await interaction.response.send_modal(modal)
 
 # ---------------------------------------------------------
-# 6. KOMUTLAR VE BAŞLATMA
+# 6. KOMUTLAR
 # ---------------------------------------------------------
 @bot.event
 async def on_ready():
@@ -173,7 +173,6 @@ async def sorgula(interaction: discord.Interaction):
     if interaction.guild and interaction.guild.icon:
         embed.set_thumbnail(url=interaction.guild.icon.url)
     embed.set_footer(text="Sorgu Sistemi • 7/24 Aktif")
-
     await interaction.response.send_message(embed=embed, view=SorguPaneliView())
 
 @sorgula.error
