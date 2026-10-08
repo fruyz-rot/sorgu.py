@@ -1,5 +1,6 @@
 import os
 import threading
+import time
 import discord
 from discord.ext import commands
 from discord import app_commands, ButtonStyle, TextStyle
@@ -8,9 +9,10 @@ from flask import Flask
 import aiohttp
 import ssl
 import json
+import requests
 
 # ---------------------------------------------------------
-# 1. FLASK KEEP-ALIVE
+# 1. FLASK KEEP-ALIVE + SELF-PING
 # ---------------------------------------------------------
 app = Flask('')
 
@@ -19,12 +21,35 @@ def home():
     return "Sorgu Botu 7/24 Aktif!"
 
 def run_flask():
-    app.run(host='0.0.0.0', port=8080)
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host='0.0.0.0', port=port)
+
+def self_ping():
+    """Botun kendi kendine ping atması için (Render uyumasın diye)."""
+    # Render'ın sana verdiği URL'yi buraya yaz (sonunda / olmadan)
+    # Örnek: "https://alves-bot.onrender.com"
+    url = os.environ.get("RENDER_EXTERNAL_URL", "")
+    if not url:
+        # Render otomatik olarak RENDER_EXTERNAL_URL ortam değişkenini sağlar
+        print("[Self-Ping] RENDER_EXTERNAL_URL bulunamadı, self-ping devre dışı.")
+        return
+    
+    while True:
+        try:
+            time.sleep(240)  # 4 dakika bekle (Render 15 dk'da uyutur)
+            r = requests.get(url, timeout=10)
+            print(f"[Self-Ping] {url} -> {r.status_code}")
+        except Exception as e:
+            print(f"[Self-Ping] Hata: {e}")
 
 def keep_alive():
-    t = threading.Thread(target=run_flask)
-    t.daemon = True
-    t.start()
+    t1 = threading.Thread(target=run_flask)
+    t1.daemon = True
+    t1.start()
+    
+    t2 = threading.Thread(target=self_ping)
+    t2.daemon = True
+    t2.start()
 
 # ---------------------------------------------------------
 # 2. BOT AYARLARI
@@ -33,7 +58,7 @@ intents = discord.Intents.default()
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 # ---------------------------------------------------------
-# 3. SSL CONTEXT (SNI HATASINI AŞMAK İÇİN)
+# 3. SSL CONTEXT
 # ---------------------------------------------------------
 ssl_context = ssl.create_default_context()
 ssl_context.check_hostname = False
@@ -85,7 +110,7 @@ class SorguModal(Modal):
 
         try:
             async with aiohttp.ClientSession() as session:
-                # --- Discord ID Sorgu (Resmi Discord API) ---
+                # --- Discord ID Sorgu ---
                 if self.param_type == "discord_id":
                     token = os.environ.get("DISCORD_BOT_TOKEN", "")
                     if not token:
@@ -108,7 +133,7 @@ class SorguModal(Modal):
                             else:
                                 content = f"⚠️ API Hatası: {resp.status}"
 
-                # --- IP Sorgu (VPN/Proxy Tespiti) ---
+                # --- IP Sorgu ---
                 elif self.param_type == "ip":
                     url = f"http://ip-api.com/json/{val}?fields=status,message,country,regionName,city,isp,org,as,proxy,hosting,query"
                     async with session.get(url, ssl=ssl_context, timeout=20) as resp:
@@ -117,7 +142,7 @@ class SorguModal(Modal):
                         else:
                             content = f"⚠️ API Hatası: {resp.status}"
 
-                # --- E-posta İhlal Sorgusu ---
+                # --- E-posta İhlal ---
                 elif self.param_type == "email_breach":
                     url = f"https://api.xposedornot.com/v1/check-email/{val}"
                     async with session.get(url, ssl=ssl_context, timeout=20) as resp:
@@ -133,11 +158,11 @@ class SorguModal(Modal):
                         else:
                             content = f"⚠️ API Hatası: {resp.status}"
 
-                # --- Telefon Numarası Sorgu (PhoneInfoga - Apify) ---
+                # --- Telefon Sorgu (PhoneInfoga - Apify) ---
                 elif self.param_type == "phone":
                     token = os.environ.get("APIFY_TOKEN", "")
                     if not token:
-                        content = "❌ Apify token'ı ayarlanmamış. Render'da APIFY_TOKEN ekle."
+                        content = "❌ Apify token'ı ayarlanmamış."
                     else:
                         url = f"https://api.apify.com/v2/acts/phoneinfoga~phone-number-osint-scanner/run-sync-get-dataset-items?token={token}&phone={val}"
                         async with session.get(url, ssl=ssl_context, timeout=60) as resp:
@@ -150,14 +175,13 @@ class SorguModal(Modal):
                             else:
                                 content = f"⚠️ API Hatası: {resp.status}"
 
-                # --- Kullanıcı Adı Sorgu (Sherlock - OSINT) ---
+                # --- Kullanıcı Adı Sorgu (Sherlock) ---
                 elif self.param_type == "username":
                     url = f"https://sherlock.nuro.dev/{val}"
                     headers = {"Accept": "application/json"}
                     async with session.get(url, headers=headers, ssl=ssl_context, timeout=30) as resp:
                         if resp.status == 200:
                             data = await resp.json()
-                            # Sherlock cevabı içindeki bulunan siteleri filtrele
                             found = {}
                             raw_data = data.get("data", data)
                             if isinstance(raw_data, dict):
@@ -173,6 +197,32 @@ class SorguModal(Modal):
                                     content += f"\n\n*(Toplam {len(found)} sonuç, ilk 30 gösteriliyor)*"
                             else:
                                 content = f"❌ **{val}** kullanıcı adı hiçbir platformda bulunamadı."
+                        else:
+                            content = f"⚠️ API Hatası: {resp.status}"
+
+                # --- İl/İlçe Sorgu ---
+                elif self.param_type == "city_district":
+                    url = "https://furkandlkdr.github.io/mermis-turkiye-districts/turkey_cities_districts.json"
+                    async with session.get(url, ssl=ssl_context, timeout=20) as resp:
+                        if resp.status == 200:
+                            data = await resp.json()
+                            aranan = val.lower().strip()
+                            bulundu = None
+                            for key, info in data.items():
+                                if isinstance(info, dict):
+                                    province = info.get("province", "")
+                                    if province.lower() == aranan:
+                                        bulundu = info
+                                        break
+                            if bulundu:
+                                province = bulundu.get("province", "")
+                                districts = bulundu.get("districts", [])
+                                ilceler = [d.get("name", "") for d in districts if isinstance(d, dict)]
+                                content = f"📍 **{province}** ili ilçeleri:\n\n"
+                                content += "\n".join([f"• {ilce}" for ilce in ilceler])
+                                content += f"\n\n**Toplam:** {len(ilceler)} ilçe"
+                            else:
+                                content = f"❌ **{val}** adında bir il bulunamadı."
                         else:
                             content = f"⚠️ API Hatası: {resp.status}"
 
@@ -194,30 +244,29 @@ class SorguPaneliView(View):
     def __init__(self):
         super().__init__(timeout=None)
 
-        # Discord ID
         btn_dc_id = Button(label="Discord ID", style=ButtonStyle.primary, row=0, custom_id="btn_dc_id")
         btn_dc_id.callback = lambda i: self.open_modal(i, "Discord ID Sorgu", "Discord ID", "discord_id")
         self.add_item(btn_dc_id)
 
-        # IP Sorgu
         btn_ip = Button(label="IP Sorgu", style=ButtonStyle.primary, row=0, custom_id="btn_ip")
         btn_ip.callback = lambda i: self.open_modal(i, "IP Sorgu", "IP Adresi", "ip")
         self.add_item(btn_ip)
 
-        # E-posta İhlal
         btn_email = Button(label="E-posta İhlal", style=ButtonStyle.primary, row=0, custom_id="btn_email")
         btn_email.callback = lambda i: self.open_modal(i, "E-posta İhlal Sorgu", "E-posta Adresi", "email_breach")
         self.add_item(btn_email)
 
-        # Telefon Numarası Sorgu
         btn_phone = Button(label="Telefon Sorgu", style=ButtonStyle.success, row=1, custom_id="btn_phone")
         btn_phone.callback = lambda i: self.open_modal(i, "Telefon Numarası Sorgu", "Telefon Numarası (+12128148373 gibi)", "phone")
         self.add_item(btn_phone)
 
-        # Kullanıcı Adı Sorgu (OSINT)
         btn_username = Button(label="Kullanıcı Adı Sorgu", style=ButtonStyle.success, row=1, custom_id="btn_username")
         btn_username.callback = lambda i: self.open_modal(i, "Kullanıcı Adı Sorgu", "Kullanıcı Adı", "username")
         self.add_item(btn_username)
+
+        btn_city = Button(label="İl/İlçe Sorgu", style=ButtonStyle.success, row=1, custom_id="btn_city")
+        btn_city.callback = lambda i: self.open_modal(i, "İl/İlçe Sorgu", "İl Adı (Örn: İstanbul)", "city_district")
+        self.add_item(btn_city)
 
     async def open_modal(self, interaction: discord.Interaction, title: str, label: str, param_type: str):
         modal = SorguModal(title_name=title, label_name=label, param_type=param_type)
